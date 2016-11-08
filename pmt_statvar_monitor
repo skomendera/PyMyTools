@@ -1,0 +1,103 @@
+#!/usr/bin/python
+
+from __future__ import print_function
+import time
+from providers import statvar, server
+from commons import PyMyToolsArgParser, PyMyToolsConnection, PyMyToolsDelay
+
+
+# Default variables to monitor
+default_variables = ['Questions', 'Com_select', 'Com_insert', 'Com_delete', 'Com_update', 'Created_tmp_tables',
+                     'Created_tmp_disk_tables', 'Innodb_row_lock_time']
+
+# Parser instantiation
+
+arg_parser = PyMyToolsArgParser('Print per-second averages of server status variables')
+
+arg_parser.parser.add_argument('--interval', help='Report interval in seconds; default: 1', default=1, type=int)
+arg_parser.parser.add_argument('--count', help='Report count; default: 60', default=60, type=int)
+arg_parser.parser.add_argument('--header-repeat', help='Header repeat interval; default: 20', default=20, type=int)
+arg_parser.parser.add_argument('--csv', help='CSV output', action='store_true', default=False)
+arg_parser.parser.add_argument('variable', nargs='*',
+                               help='Names of status variables to monitor; default: %s' % ' '.join(default_variables),
+                               default=default_variables)
+
+arg_parser.parse_args()
+arg_parser.handle_version()
+arg_parser.handle_connection_parameters()
+
+report_interval = arg_parser.args['interval']
+report_count = arg_parser.args['count']
+report_csv = arg_parser.args['csv']
+report_raw = report_csv
+report_variables = arg_parser.args['variable']
+report_header_repeat = arg_parser.args['header_repeat']
+
+# Delay execution if necessary, connect to database
+
+delay = PyMyToolsDelay(arg_parser)
+delay.delay()
+
+dbc = PyMyToolsConnection(arg_parser)
+dbc.connect()
+
+# Logic
+
+i = 0
+iteration_time = 0
+
+sql = "SHOW GLOBAL STATUS WHERE variable_name IN ('%s')" % "', '".join(report_variables)
+
+header = statvar.format_header(report_variables, report_csv)
+
+server_uptime = server.get_uptime(dbc.connection)
+
+while i < report_count:
+
+    iteration_start = time.time()
+
+    tmp_db_result = server.execute_raw_dict(dbc.connection, sql)
+
+    current_row = statvar.db_result_to_ordered_list(tmp_db_result, report_variables)
+
+    if i == 0:
+
+        if not report_csv:
+
+            print(statvar.format_information_line('Per-second deltas since restart or FLUSH STATUS'))
+            print('-' * len(header))
+            print(header)
+
+            previous_row = statvar.get_zerofilled_row(report_variables)
+            deltas = statvar.calculate_deltas(previous_row, current_row, server_uptime)
+            print(statvar.format_result_row_horizontal(report_variables, deltas, report_csv))
+            print('')
+
+            print(statvar.format_information_line('Per-second deltas every %s second(s)' % report_interval))
+            print('-' * len(header))
+
+        print(header)
+
+    else:
+
+        if i % report_header_repeat == 0:
+
+            print('-' * len(header))
+            print(header)
+
+        deltas = statvar.calculate_deltas(previous_row, current_row, report_interval)
+        print(statvar.format_result_row_horizontal(report_variables, deltas, report_csv))
+
+    previous_row = current_row
+
+    iteration_time = time.time() - iteration_start
+
+    if iteration_time < report_interval:
+
+        time.sleep(report_interval - iteration_time)
+
+    i += 1
+
+# Cleanup
+
+print('>>> Script execution finished at %s UTC' % time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime()))

@@ -1,0 +1,279 @@
+#!/usr/bin/python
+
+from __future__ import print_function
+import time
+import sys
+from providers import terminal, table, server, user, result
+from commons import PyMyToolsArgParser, PyMyToolsConnection, PyMyToolsDelay
+
+# Future
+
+get_input = input
+
+if sys.version_info[:2] <= (2, 7):
+
+    get_input = raw_input
+
+# Parser instantiation
+
+arg_parser = PyMyToolsArgParser('Find tables and print details about table structure, indexes and statistics; '
+                                'find index design issues')
+
+arg_parser.parser.add_argument('--analyze', help='Analyze the table and report index '
+                                                 'cardinality changes; default: False',
+                               action='store_true', default=False)
+arg_parser.parser.add_argument('--find', help='Only find the table, do not generate report; default: False',
+                               action='store_true', default=False)
+arg_parser.parser.add_argument('--analyze-extended',
+                               help='Analyze the table using 2 sample sizes (server/table default and sample size '
+                                    'specified in --extended-sample-size); report index cardinality changes '
+                                    '(implies --analyze, default: False); requires ALTER privilege on the table',
+                               action='store_true', default=False)
+arg_parser.parser.add_argument('--extended-sample-size', help='Page count for stats sampling with --analyze-extended; '
+                                                              'default: 256',
+                               default=256, type=int)
+arg_parser.parser.add_argument('table_name', help='Table name')
+arg_parser.parser.add_argument('schema_name', nargs='?', help='Table schema; default: try to find table automatically',
+                               default=None)
+
+arg_parser.parse_args()
+arg_parser.handle_version()
+arg_parser.handle_connection_parameters()
+
+table_schema = arg_parser.args['schema_name']
+table_name = arg_parser.args['table_name']
+
+do_find = arg_parser.args['find']
+do_analyze_extended = arg_parser.args['analyze_extended']
+do_analyze = True if do_analyze_extended else arg_parser.args['analyze']
+
+extended_sample_size = arg_parser.args['extended_sample_size']
+
+# Delay execution if necessary, connect to database
+
+delay = PyMyToolsDelay(arg_parser)
+delay.delay()
+
+dbc = PyMyToolsConnection(arg_parser)
+dbc.connect()
+
+# Header
+
+header_lines = [
+    'pmt_table_report invoked at %s UTC' % time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())
+]
+
+print(terminal.get_header_l1(header_lines, 120))
+
+# Find or verify schema
+
+if table_schema is None:
+
+    print('Schema name not provided, looking for schemas that contain table `%s`...' % table_name)
+    print('')
+
+    found_schemas = table.find_schema(dbc.connection, table_name)
+
+    if len(found_schemas) == 0:
+
+        print('!!! Table `%s` not found on instance' % table_name)
+
+    elif len(found_schemas) == 1:
+
+        print('>>> Table `%s` found in schema `%s`' % (table_name, found_schemas.pop()['table_schema']))
+
+    elif len(found_schemas) > 1:
+
+        print('Table name found in multiple schemas:')
+        print('')
+
+        for i in range(len(found_schemas)):
+            print('(%s) %s' % (i + 1, found_schemas[i]['table_schema']))
+
+        print('')
+
+        if do_find:
+            sys.exit(0)
+
+        schema_choice = 0
+
+        while schema_choice <= 0 or schema_choice > len(found_schemas):
+
+            try:
+
+                schema_choice = int(get_input('Enter option number (1-%s): ' % len(found_schemas)))
+
+            except ValueError as e:
+
+                schema_choice = 0
+
+        table_schema = found_schemas[schema_choice - 1]['table_schema']
+
+        print('>>> You chose schema `%s` for table `%s`' % (table_schema, table_name))
+
+else:
+
+    if not table.exists_in_schema(dbc.connection, table_name, table_schema):
+
+        print('!!! Table `%s` not found in schema `%s`, please check input parameters' % (table_name, table_schema))
+        sys.exit(1)
+
+    else:
+
+        print('>>> Table `%s` found in schema `%s`' % (table_name, table_schema))
+
+        if do_find:
+            sys.exit(0)
+
+# Show create
+
+print(terminal.get_header_l2(['Table structure']))
+
+table_definition = table.get_show_create(dbc.connection, table_name, table_schema)
+
+print(table_definition['definition'])
+
+# Table design warnings
+
+if table_definition['type'] == 'view':
+
+    print(terminal.get_header_l2(['Index analysis not available for views']))
+
+else:
+
+    print(terminal.get_header_l2(['Index analysis']))
+
+    index_info = table.get_indexes(dbc.connection, table_name, table_schema)
+    redundant_indexes = table.get_redundant_indexes(index_info)
+
+    if 'PRIMARY' not in index_info:
+        print('! Table has no explicit primary key')
+
+    if len(redundant_indexes) == 0:
+
+        print('- No redundant indexes found')
+
+    else:
+
+        for (rk, rv) in redundant_indexes.items():
+            print('! Index `%s` may be redundant with `%s`' % (rk, '`, `'.join(rv)))
+
+    unbound_textual_indexes = table.get_unbound_textual_indexes(dbc.connection, table_name, table_schema)
+
+    if len(unbound_textual_indexes) == 0:
+
+        print('- No unbound CHAR/VARCHAR indexes found')
+
+    else:
+
+        for i in unbound_textual_indexes:
+            print('! Index `%s` contains textual columns without prefix' % i['index_name'])
+
+# Size & statistics before analyze
+
+if table_definition['type'] == 'view':
+
+    print(terminal.get_header_l2(['Table size and index statistics not avilable for views']))
+
+else:
+
+    print(terminal.get_header_l2(['Table size (before ANALYZE)']))
+
+    size_info = table.get_size(dbc.connection, table_name, table_schema)
+
+    print('Rows: %s, %s bytes on average' % (size_info['table_rows'], size_info['avg_row_length']))
+    print('Size: %s GiB (data) + %s GiB (index) = %s GiB total (%s%% index)' \
+          % (size_info['data_gb'], size_info['index_gb'], size_info['total_gb'],
+             int(size_info['index_gb'] / size_info['total_gb'] * 100) if size_info['total_gb'] != 0 else 0))
+
+    print(terminal.get_header_l2(['Index cardinality (before ANALYZE)']))
+
+    index_stats = table.get_index_stats(dbc.connection, table_name, table_schema)
+
+    if len(index_stats):
+
+        print(result.result_format_tabular(index_stats))
+
+    else:
+
+        print('>>> No indexes found')
+
+# Analyze and report size & index stats
+
+if do_analyze and not table_definition['type'] == 'view':
+
+    table.analyze(dbc.connection, table_name, table_schema)
+
+    print(terminal.get_header_l2(['Table size (after ANALYZE)']))
+
+    size_info = table.get_size(dbc.connection, table_name, table_schema)
+
+    print('Rows: %s, %s bytes on average' % (size_info['table_rows'], size_info['avg_row_length']))
+    print('Size: %s GiB (data) + %s GiB (index) = %s GiB total (%s%% index)' \
+          % (size_info['data_gb'], size_info['index_gb'], size_info['total_gb'],
+             int(size_info['index_gb'] / size_info['total_gb'] * 100) if size_info['total_gb'] != 0 else 0))
+
+    if len(index_stats):
+        print(terminal.get_header_l2(['Index cardinality (after ANALYZE)']))
+
+        index_stats = table.get_index_stats(dbc.connection, table_name, table_schema)
+
+        print(result.result_format_tabular(index_stats))
+
+# Try a bigger sample size and report size & index stats
+
+if do_analyze_extended and not table_definition['type'] == 'view' and len(index_stats):
+
+    print(terminal.get_header_l2(['Index statistics (after ANALYZE with %s-page sample)' % extended_sample_size]))
+
+    table_sample_pages = table.get_custom_sample_pages(dbc.connection, table_name, table_schema)
+
+    if table_sample_pages is None:
+
+        original_sample_pages = server.get_global_variable(dbc.connection, 'innodb_stats_persistent_sample_pages')
+
+        print('>>> Table does not have custom sampling configuration, global setting is %s pages'
+              % original_sample_pages)
+
+    else:
+
+        print('>>> Table sample size currently configured to %s pages' % table_sample_pages)
+
+        original_sample_pages = table_sample_pages
+
+    if int(original_sample_pages) == extended_sample_size:
+
+        print('! Global or table sample size already equal to %s pages, skipping' % original_sample_pages)
+
+    else:
+
+        try:
+
+            table.set_sample_size(dbc.connection, table_name, table_schema, extended_sample_size)
+
+        except Exception as e:
+
+            print('!!! Could not set sample size: %s' % e)
+            sys.exit(1)
+
+        table.analyze(dbc.connection, table_name, table_schema)
+
+        index_stats = table.get_index_stats(dbc.connection, table_name, table_schema)
+
+        print(result.result_format_tabular(index_stats))
+
+        if table_sample_pages is None:
+
+            print('>>> Reverting to default sampling configuration')
+
+            table.set_sample_size(dbc.connection, table_name, table_schema, 'default')
+
+        else:
+
+            print('>>> Reverting to previous sampling configuration')
+
+            table.set_sample_size(dbc.connection, table_name, table_schema, original_sample_pages)
+
+# Cleanup
+
+print('>>> Script execution finished at %s UTC' % time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime()))

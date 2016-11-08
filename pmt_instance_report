@@ -1,0 +1,203 @@
+#!/usr/bin/python
+
+from __future__ import print_function
+import time
+from providers import terminal, server, result, statvar
+from commons import PyMyToolsArgParser, PyMyToolsConnection, PyMyToolsDelay
+
+# Parser instantiation
+
+arg_parser = PyMyToolsArgParser('Summarize server status variables and sample engine metrics')
+
+arg_parser.parser.add_argument('--sample-length', help='Sample length (seconds); default: 5',
+                               default=5, type=int)
+
+arg_parser.parse_args()
+arg_parser.handle_version()
+arg_parser.handle_connection_parameters()
+
+sample_length = arg_parser.args['sample_length']
+
+# Delay execution if necessary, connect to database
+
+delay = PyMyToolsDelay(arg_parser)
+delay.delay()
+
+dbc = PyMyToolsConnection(arg_parser)
+dbc.connect()
+
+# Header
+
+header_lines = [
+    'pmt_instance_report invoked at %s UTC' % time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())
+]
+
+print(terminal.get_header_l1(header_lines, 120))
+
+# Global status variables
+
+gs = result.convert_to_dict(server.execute_raw_dict(dbc.connection, 'show global status'))
+gv = result.convert_to_dict(server.execute_raw_dict(dbc.connection, 'show global variables'))
+
+is_aurora = True if 'aurora_version' in gv else False
+
+if is_aurora:
+
+    print(terminal.get_key_value_adjusted('Instance name', gv['aurora_server_id'], 20))
+    print(terminal.get_key_value_adjusted('Engine version', gv['aurora_version'], 20))
+
+else:
+
+    print(terminal.get_key_value_adjusted('Engine version', gv['version'], 20))
+
+tmp_value = '%s seconds (%s)' % (gs['Uptime'], terminal.format_seconds(gs['Uptime']))
+
+print(terminal.get_key_value_adjusted('Uptime', tmp_value, 20))
+
+print(terminal.get_header_l2(['Server statistics']))
+
+# Lock manager
+
+if is_aurora:
+    tmp_value = '%s MB' % round(float(gs['Aurora_lockmgr_memory_used']) / 1024 / 1024, 3)
+    print(terminal.get_key_value_adjusted('Lock manager memory', tmp_value, 20))
+
+# Query cache
+
+tmp_value = 'Enabled' if gv['query_cache_type'] == 'ON' else 'Disabled'
+
+if int(gv['query_cache_size']) == 0:
+
+    tmp_value += ', zero size'
+
+else:
+
+    tmp_value += ', %s MB free in %s block(s); hit ratio %s%%; %s queries in cache, %s not cached, %s evicted' % \
+                 (round(int(gs['Qcache_free_memory']) / 1024 / 1024, 2), gs['Qcache_free_blocks'],
+                  0 if int(gs['Qcache_hits']) == 0 else
+                  round(int(gs['Qcache_hits']) / int(gs['Qcache_hits']) + int(gs['Com_select']) * 100, 1),
+                  gs['Qcache_queries_in_cache'], gs['Qcache_not_cached'], gs['Qcache_lowmem_prunes']
+                  )
+
+print(terminal.get_key_value_adjusted('Query cache', tmp_value, 20))
+
+# Buffer pool
+
+tmp_value = '%s / %s GB free; hit ratio %s %%; %s disk reads/s; %s pages free, %s pages used' % \
+            (round(gs['Innodb_buffer_pool_pages_free'] * 16384 / 1024 / 1024 / 1024, 3),
+             round((gs['Innodb_buffer_pool_pages_free'] * 16384 + gs['Innodb_buffer_pool_bytes_data'])
+                   / 1024 / 1024 / 1024, 3),
+             round((gs['Innodb_buffer_pool_read_requests'] - gs['Innodb_buffer_pool_reads']) /
+                   float(gs['Innodb_buffer_pool_read_requests']) * 100, 1),
+             0 if gs['Innodb_buffer_pool_reads'] else round(gs['Innodb_buffer_pool_reads'] / gs['Uptime'], 1),
+             gs['Innodb_buffer_pool_pages_free'], gs['Innodb_buffer_pool_pages_data']
+             )
+
+print(terminal.get_key_value_adjusted('Buffer pool', tmp_value, 20))
+
+print('')
+
+# Connections & queries
+
+tmp_value = '%s connections/s (%s total, %s aborted) , %s user queries/s, %s total statements/s' % \
+            (round(gs['Connections'] / gs['Uptime'], 1), gs['Connections'],
+             gs['Aborted_clients'] + gs['Aborted_connects'], round(gs['Questions'] / gs['Uptime'], 1),
+             round(gs['Queries'] / gs['Uptime'], 1))
+
+print(terminal.get_key_value_adjusted('Connection activity', tmp_value, 20))
+
+# Query throughput & latency
+
+all_insert_count = gs['Com_insert'] + gs['Com_insert_select']
+all_update_count = gs['Com_update'] + gs['Com_update_multi']
+all_delete_count = gs['Com_delete'] + gs['Com_delete_multi']
+
+if is_aurora:
+
+    tmp_value = '%s selects/s (%s ms avg), %s inserts/s (%s ms avg), %s updates/s (%s ms avg), ' \
+                '%s deletes/s (%s ms avg)' \
+                % (round(gs['Com_select'] / gs['Uptime'], 1),
+                   round(gs['AuroraDb_select_stmt_duration'] / gs['Com_select'] / 1000.0, 1),
+                   round(all_insert_count / gs['Uptime'], 1),
+                   round(gs['AuroraDb_insert_stmt_duration'] / all_insert_count / 1000.0, 1) if all_insert_count else 0,
+                   round(all_update_count / gs['Uptime'], 1),
+                   round(gs['AuroraDb_update_stmt_duration'] / all_update_count / 1000.0, 1) if all_update_count else 0,
+                   round(all_delete_count / gs['Uptime'], 1),
+                   round(gs['AuroraDb_delete_stmt_duration'] / all_delete_count / 1000.0, 1) if all_delete_count else 0,
+                   )
+
+else:
+
+    tmp_value = '%s selects/s, %s inserts/s, %s updates/s , %s deletes/s' \
+                % (round(gs['Com_select'] / gs['Uptime'], 1), round(all_insert_count / gs['Uptime'], 1),
+                   round(all_update_count / gs['Uptime'], 1), round(all_delete_count / gs['Uptime'], 1))
+
+print(terminal.get_key_value_adjusted('Query activity', tmp_value, 20))
+
+# Sessions
+
+print(terminal.get_header_l2(['Current sessions summary by time @ state (excluding internal RDS accounts)']))
+
+processlist_query = "select command as 'Session state', count(*) as 'Total', " \
+                    "sum(if(time >= 0 and time < 10, 1, 0)) as '0-10 seconds', " \
+                    "sum(if(time >= 10 and time < 100, 1, 0)) as '10-100 seconds', " \
+                    "sum(if(time >= 100 and time < 1000, 1, 0)) as '100-1K seconds', " \
+                    "sum(if(time >= 1000 and time < 10000, 1, 0)) as '1K-10K seconds', " \
+                    "sum(if(time >= 10000 and time < 100000, 1, 0)) as '10K-100K seconds', " \
+                    "sum(if(time >= 100000, 1, 0)) as '100K+ seconds' from information_schema.processlist " \
+                    "where user not in ('rdsadmin', 'rdsrepladmin') group by command"
+
+print(result.result_format_tabular(server.execute_raw_dict(dbc.connection, processlist_query)))
+
+# Transactions
+
+print(terminal.get_header_l2(['Purge & active transactions']))
+
+print(server.get_trx_purge_info(dbc.connection))
+print('')
+
+trx_query = "select trx_id as 'TRX ID', trx_mysql_thread_id as 'Session ID', trx_state as 'State', " \
+            "trx_started as 'Started', timediff(now(), trx_started) as 'Age', trx_tables_in_use as 'Tables used', " \
+            "trx_tables_locked as 'Tables locked', trx_rows_locked as 'Rows locked', " \
+            "trx_rows_modified as 'Rows modified' from information_schema.innodb_trx"
+
+trx_result = server.execute_raw_dict(dbc.connection, trx_query)
+
+print(result.result_format_tabular(trx_result) if len(trx_result) > 0 else '(no active transactions)')
+
+# 5-second workload sample
+
+print(terminal.get_header_l2(['Current workload (per second averages, %s second sample)' % sample_length]))
+
+i = 0
+
+if is_aurora:
+
+    report_variables = ['Questions', 'Com_select', 'Com_insert', 'Com_delete', 'Com_update', 'Created_tmp_tables',
+                        'Created_tmp_disk_tables', 'Innodb_row_lock_time', 'AuroraDb_ddl_stmt_duration',
+                        'AuroraDb_select_stmt_duration', 'AuroraDb_insert_stmt_duration',
+                        'AuroraDb_update_stmt_duration', 'AuroraDb_delete_stmt_duration']
+
+else:
+
+    report_variables = ['Questions', 'Com_select', 'Com_insert', 'Com_delete', 'Com_update', 'Created_tmp_tables',
+                        'Created_tmp_disk_tables', 'Innodb_row_lock_time']
+
+header = statvar.format_header(report_variables, False)
+
+sql = "SHOW GLOBAL STATUS WHERE variable_name IN ('%s')" % "', '".join(report_variables)
+
+previous_row = statvar.db_result_to_ordered_list(server.execute_raw_dict(dbc.connection, sql), report_variables)
+
+time.sleep(sample_length)
+
+current_row = statvar.db_result_to_ordered_list(server.execute_raw_dict(dbc.connection, sql), report_variables)
+
+deltas = statvar.calculate_deltas(previous_row, current_row, sample_length)
+print(statvar.format_result_row_vertical(report_variables, deltas))
+
+print('')
+
+# Cleanup
+
+print('>>> Script execution finished at %s UTC' % time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime()))

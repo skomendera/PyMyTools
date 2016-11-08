@@ -1,0 +1,162 @@
+#!/usr/bin/python
+
+from __future__ import print_function
+import time
+import sys
+import os
+from providers import terminal, server, result
+from commons import PyMyToolsArgParser, PyMyToolsConnection, PyMyToolsDelay
+
+# Parser instantiation
+
+arg_parser = PyMyToolsArgParser('Regularly dump output from diagnostic statements')
+
+arg_parser.parser.add_argument('--interval', help='Dump interval in seconds; default: 60', default=60, type=int)
+arg_parser.parser.add_argument('--count', help='Dump count; default: 15', default=15, type=int)
+arg_parser.parser.add_argument('--output-dir', help='Output directory; default ./pmt_diag_monitor_YYYYMMDD-HHMMSS',
+                               default=None, type=str)
+
+arg_parser.parser.add_argument('--skip-processlist', help='Skip processlit output; default: False', action='store_true',
+                               default=False)
+arg_parser.parser.add_argument('--skip-global-status', help='Skip global status output; default: False',
+                               action='store_true',
+                               default=False)
+arg_parser.parser.add_argument('--skip-innodb-status', help='Skip innodb engine status output; default: False',
+                               action='store_true',
+                               default=False)
+arg_parser.parser.add_argument('--skip-innodb-trx', help='Skip information_schema.innodb_trx output; default: False',
+                               action='store_true', default=False)
+arg_parser.parser.add_argument('--skip-innodb-locks',
+                               help='Skip information_schema.innodb_locks output; default: False', action='store_true',
+                               default=False)
+arg_parser.parser.add_argument('--skip-innodb-lock-waits',
+                               help='Skip a join query on information_schema.innodb_lock_waits '
+                                    'and information_schema.innodb_trx; default: False',
+                               action='store_true', default=False)
+
+arg_parser.parse_args()
+arg_parser.handle_version()
+arg_parser.handle_connection_parameters()
+
+report_interval = int(arg_parser.args['interval'])
+report_count = arg_parser.args['count']
+report_output_dir = arg_parser.args['output_dir']
+
+report_commands = [
+    {'name': 'processlist', 'command': 'show full processlist', 'format': 'vertical'},
+    {'name': 'global_status', 'command': 'show global status', 'format': 'keyvalue'},
+    {'name': 'innodb_status', 'command': 'show engine innodb status', 'format': 'vertical'},
+    {'name': 'innodb_trx', 'command': 'select * from information_schema.innodb_trx', 'format': 'vertical'},
+    {'name': 'innodb_locks', 'command': 'select * from information_schema.innodb_locks', 'format': 'tabular'},
+    {'name': 'innodb_lock_waits', 'command': 'SELECT r.trx_id waiting_trx_id, r.trx_mysql_thread_id waiting_thread, '
+                                             'r.trx_query waiting_query, b.trx_id blocking_trx_id, '
+                                             'b.trx_mysql_thread_id blocking_thread, b.trx_query blocking_query '
+                                             'FROM information_schema.innodb_lock_waits w INNER JOIN '
+                                             'information_schema.innodb_trx b ON b.trx_id = w.blocking_trx_id '
+                                             'INNER JOIN information_schema.innodb_trx r '
+                                             'ON r.trx_id = w.requesting_trx_id', 'format': 'vertical'},
+
+]
+
+# Skip all?
+
+skip_all = True
+
+for c in report_commands:
+
+    skip_key = 'skip_%s' % c['name']
+
+    if arg_parser.args[skip_key] is False:
+
+        skip_all = False
+
+if skip_all:
+
+    print('!!! You chose to skip all diagnostic outputs, exiting')
+    sys.exit(0)
+
+# Header
+
+header_lines = [
+    'pmt_diag_monitor invoked at %s UTC; dump count = %s, interval = %s seconds'
+    % (time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime()), report_count, report_interval)
+]
+
+print(terminal.get_header_l1(header_lines, 120))
+
+# Delay execution if necessary, connect to database
+
+delay = PyMyToolsDelay(arg_parser)
+delay.delay()
+
+dbc = PyMyToolsConnection(arg_parser)
+dbc.connect()
+
+# Create directory
+
+if report_output_dir is None:
+    report_output_dir = './pmt_diag_monitor_' + time.strftime('%Y%m%d-%H%M%S', time.gmtime())
+
+try:
+
+    os.mkdir(report_output_dir)
+
+except OSError as e:
+
+    print('!!! Could not create output directory: %s' % e)
+    sys.exit(1)
+
+# Dump
+
+i = 0
+iteration_time = 0
+
+while True:
+
+    print('--- This sample: %s of %s every %s s' % (i + 1, report_count, report_interval))
+
+    iteration_start = time.time()
+    sample_time = str(int(iteration_start))
+
+    for c in report_commands:
+
+        skip_key = 'skip_%s' % c['name']
+
+        if arg_parser.args[skip_key] is True:
+
+            continue
+
+        output_path = report_output_dir + '/' + c['name'] + '_' + sample_time + '.txt'
+
+        f = open(output_path, 'w+')
+
+        print('>>> Writing "%s" to "%s"' % (c['name'], output_path))
+
+        command_result = server.execute_raw_dict(dbc.connection, c['command'])
+        command_result_formatted = result.result_format(command_result, c['format'])
+
+        f.write(command_result_formatted)
+
+    i += 1
+
+    if i == report_count:
+        break
+
+    iteration_time = time.time() - iteration_start
+
+    if iteration_time > report_interval:
+
+        print('!!! Iteration took %s ms, which is longer than report interval; executing next iteration immediately'
+              % round(iteration_time * 1000))
+
+    else:
+
+        print('--- Iteration took %s ms, now sleeping for %s s'
+              % (round(iteration_time * 1000), round(report_interval - iteration_time, 3)))
+
+        time.sleep(report_interval - iteration_time)
+
+# Cleanup
+
+print('---')
+print('>>> Script execution finished at %s UTC' % time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime()))

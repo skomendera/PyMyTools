@@ -1,0 +1,1 @@
+system_schemas = ['information_schema', 'performance_schema', 'mysql']
