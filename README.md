@@ -142,7 +142,8 @@ Parameters:
 
 Amazon Aurora enjoys the following unique features:
 
-- Support for statement latency calculations in `pmt_instance_report`, `pmt_cluster_report` - Support for statement latency status variables in `pmt_statvar_monitor`
+- Support for statement latency calculations in `pmt_instance_report`, `pmt_cluster_report`
+- Support for statement latency status variables in `pmt_statvar_monitor`
 - `pmt_cluster_report`
 
 ### Elevated privilege requirements
