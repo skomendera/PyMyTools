@@ -74,6 +74,9 @@ Parameters:
 
 | Parameter | Description |
 | --- | --- |
+| `--interval` | Dump interval in seconds; default: 60 |
+| `--count` | Dump count; default: 15 |
+| `--output-dir` | Output directory; default ./pmt_diag_monitor_YYYYMMDD-HHMMSS |
 | `--skip-processlist` | Skip processlit output; default: False |
 | `--skip-global-status` | Skip global status output; default: False |
 | `--skip-innodb-status` | Skip innodb engine status output; default: False |
