@@ -4,6 +4,8 @@ PyMyTools: simple diagnostic toolkit for Amazon Aurora and MySQL
 
 Version: 0.1
 
+See [this blog post](http://blog.symedia.pl/2016/11/pymytools-simple-diagnostic-aurora-mysql.html) for more information and tool demonstrations.
+
 # Available commands
 
 | Command | Description |
@@ -142,7 +144,7 @@ Parameters:
 
 Amazon Aurora enjoys the following unique features:
 
-- Support for statement latency calculations in `pmt_instance_report`, `pmt_cluster_report`
+- Support for statement latency calculations in `pmt_instance_report`, `pmt_cluster_report` 
 - Support for statement latency status variables in `pmt_statvar_monitor`
 - `pmt_cluster_report`
 
