@@ -142,7 +142,7 @@ Parameters:
 
 ### Features unique to Amazon Aurora
 
-Amazon Aurora enjoys the following unique features:
+PyMyTools enjoy the following unique features when used against Amazon Aurora:
 
 - Support for statement latency calculations in `pmt_instance_report`, `pmt_cluster_report` 
 - Support for statement latency status variables in `pmt_statvar_monitor`
