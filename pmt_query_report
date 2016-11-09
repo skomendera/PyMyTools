@@ -28,7 +28,6 @@ report_file = arg_parser.args['input_file']
 report_trace = arg_parser.args['trace']
 report_profile = arg_parser.args['profile']
 report_vertical = arg_parser.args['vertical']
-report_partitions = arg_parser.args['partitions']
 
 try:
 
@@ -80,7 +79,7 @@ filterwarnings('ignore', category=pymysql.Warning)
 
 print(terminal.get_header_l2(['EXPLAIN output']))
 
-explain_query = 'explain partitions %s' % report_query if report_partitions else 'explain partitions %s' % report_query
+explain_query = 'explain partitions %s' % report_query
 
 explain_result = server.execute_raw_dict(dbc.connection, explain_query)
 

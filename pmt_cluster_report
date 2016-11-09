@@ -9,7 +9,7 @@ from commons import PyMyToolsArgParser, PyMyToolsConnection, PyMyToolsDelay
 
 # Parser instantiation
 
-arg_parser = PyMyToolsArgParser('Explain Aurora cluster topology, sumamrize status variables and sample engine metrics'
+arg_parser = PyMyToolsArgParser('Explain Aurora cluster topology, summarize status variables and sample engine metrics '
                                 'for each cluster node', 'cluster')
 
 arg_parser.parser.add_argument('--sample-length', help='Workload sample length (seconds); default: do not sample',
