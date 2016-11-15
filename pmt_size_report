@@ -1,0 +1,278 @@
+#!/usr/bin/python
+
+from __future__ import print_function
+import sys
+import time
+import copy
+from six.moves import input
+from providers import terminal, server, schema, table, value
+from commons import PyMyToolsArgParser, PyMyToolsConnection, PyMyToolsDelay
+
+# Parser instantiation
+
+arg_parser = PyMyToolsArgParser('Print storage consumption in an instance or selected schema(s), except system schemas')
+
+arg_parser.parser.add_argument('--sort', help='Sort order for table lists; default: size',
+                               choices=['alpha','size'], type=str, default='size')
+arg_parser.parser.add_argument('--limit', help='List at most that many tables per schema; default: 10, '
+                                               'implies --sort size', type=int, default=None)
+arg_parser.parser.add_argument('--analyze', help='Analyze all tables in scope before calculating their size',
+                               action='store_true', default=False)
+arg_parser.parser.add_argument('schema', nargs='*',
+                               help='Names of schemas for which size should be calculated; default: all schemas', default=None)
+
+arg_parser.parse_args()
+arg_parser.handle_version()
+arg_parser.handle_connection_parameters()
+
+if arg_parser.args['limit'] is None:
+
+    arg_sort = arg_parser.args['sort']
+    arg_limit = 10
+
+else:
+
+    arg_sort = 'size'
+    arg_limit = arg_parser.args['limit']
+
+arg_analyze = arg_parser.args['analyze']
+requested_schemas_list = arg_parser.args['schema']
+
+if arg_limit <= 0:
+
+    print('!!! You chose a negative limit, come on...')
+    sys.exit(1)
+
+# Delay execution if necessary, connect to database
+
+delay = PyMyToolsDelay(arg_parser)
+delay.delay()
+
+dbc = PyMyToolsConnection(arg_parser)
+dbc.connect()
+
+# Header
+
+header_lines = [
+    'pmt_size_report invoked at %s UTC' % time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())
+]
+
+print(terminal.get_header_l1(header_lines, 120))
+
+# Validate schemas
+
+server_schemas_list = schema.get_list(dbc.connection, True)
+
+if requested_schemas_list is None:
+
+    print('>>> Selected schemas: all')
+    requested_schemas_list = server_schemas_list
+
+else:
+
+    print('>>> Selected schemas: `%s`' % '`, `'.join(requested_schemas_list))
+
+    for s in copy.copy(requested_schemas_list):
+
+        if s in schema.system_schemas:
+
+            print('!!! Schema `%s` is a system schema, skipping' % s)
+            requested_schemas_list.remove(s)
+
+    if len(requested_schemas_list) == 0:
+
+        print('!!! No schemas to process, exiting')
+        sys.exit(1)
+
+    for s in requested_schemas_list:
+
+        if s not in server_schemas_list:
+
+            print('!!! Schema `%s` was not found on server and will not be processed' % s)
+
+# Count tables & warn
+
+# More lightweight under load than select count(*)
+
+query = "select 1 as s from information_schema.tables " \
+        "where table_schema in ('%s') and table_type = 'base table' limit 2000" \
+        % "', '".join(requested_schemas_list)
+
+tables_count = len(server.execute_raw_dict(dbc.connection, query))
+
+if tables_count == 2000:
+
+    print('!!! Found at least %s tables in scope, processing might be slow. Continue?' % tables_count)
+
+    decision = None
+
+    while decision not in ['y', 'n']:
+
+        decision = input('y/n: ')
+
+    if decision == 'n':
+
+        sys.exit(0)
+
+# Logic
+
+# Scanning all tables without group by / order by even if we're just returning 10 largest per schema
+# Doing order by size desc limit 10 would need to scan all tables anyway, would also need temptables
+# We also need schema-wide totals anyway
+
+sql = 'select table_schema, table_name, table_rows, index_length, data_length from information_schema.tables ' \
+      "where table_schema in ('%s') and table_type = 'base table'" % "', '".join(requested_schemas_list)
+
+result_dict = server.execute_raw_dict(dbc.connection, sql)
+
+if arg_analyze:
+
+    print()
+
+    for t in result_dict:
+
+        print('>>> Analyzing table `%s`.`%s`' % (t['table_schema'], t['table_name']))
+        table.analyze(dbc.connection, t['table_name'], t['table_schema'])
+
+    result_dict = server.execute_raw_dict(dbc.connection, sql)
+
+tables_dict = {}
+schema_sizes_dict = {}
+
+sum_data_size = 0
+sum_index_size = 0
+sum_row_count = 0
+
+max_table_name_width = 0
+max_schema_name_width = 0
+
+for t in result_dict:
+
+    if t['table_schema'] not in tables_dict:
+
+        tables_dict[t['table_schema']] = []
+        schema_sizes_dict[t['table_schema']] = {'data_length': 0, 'index_length': 0, 'table_rows': 0}
+
+        if len(t['table_schema']) > max_schema_name_width:
+            max_schema_name_width = len(t['table_schema'])
+
+    tables_dict[t['table_schema']].append(t)
+
+    schema_sizes_dict[t['table_schema']]['data_length'] += t['data_length']
+    schema_sizes_dict[t['table_schema']]['index_length'] += t['index_length']
+    schema_sizes_dict[t['table_schema']]['table_rows'] += t['table_rows']
+
+    sum_data_size += t['data_length']
+    sum_index_size += t['index_length']
+    sum_row_count += t['table_rows']
+
+    if len(t['table_name']) > max_table_name_width:
+        max_table_name_width = len(t['table_name'])
+
+sorted_schemas_dict = sorted(schema_sizes_dict.items(), key=lambda kv: kv[1]['data_length']+kv[1]['index_length'],
+                             reverse=True)
+
+print(terminal.get_header_l2(['Schema summary']))
+
+max_schema_size = sorted_schemas_dict[0][1]['data_length'] + sorted_schemas_dict[0][1]['index_length']
+
+# Schema summary
+
+bar_width = 25
+
+print('Total size of selected schemas: %s M rows, %s GiB total, %s GiB data, %s GiB index'
+      % (value.count_to_millions(sum_row_count),
+         value.bytes_to_gib(sum_data_size + sum_index_size),
+         value.bytes_to_gib(sum_data_size),
+         value.bytes_to_gib(sum_index_size)))
+
+print()
+print('= denotes Data, # denotes Index')
+
+print()
+
+for s in sorted_schemas_dict:
+
+    if max_schema_size == 0:
+
+        data_length_component = 0
+        index_length_component = 0
+
+    else:
+
+        data_length_component = int(s[1]['data_length'] / float(max_schema_size) * bar_width)
+        index_length_component = int(s[1]['index_length'] / float(max_schema_size) * bar_width)
+
+    bars = '%s%s' % ('=' * data_length_component, '#' * index_length_component)
+    bars = '{0:<{width}}'.format(bars, width=bar_width)
+
+    print('%s [%s] %s M rows, %s GiB, %s GiB data, %s GiB index'
+          % ('{0:<{width}}'.format(s[0], width=max_schema_name_width),
+             bars,
+             '{0:>{width}}'.format(value.count_to_millions(s[1]['table_rows']), width=9),
+             '{0:>{width}}'.format(value.bytes_to_gib(s[1]['data_length']+s[1]['index_length']), width=7),
+             '{0:>{width}}'.format(value.bytes_to_gib(s[1]['data_length']), width=7),
+             '{0:>{width}}'.format(value.bytes_to_gib(s[1]['index_length']), width=7)))
+
+# Table summary
+
+print()
+
+for s in requested_schemas_list:
+
+    if s not in tables_dict:
+
+        print('>>> No tables in schema `%s`' % s)
+
+for s in requested_schemas_list:
+
+    if s not in tables_dict:
+        continue
+
+    sorted_tables_list = sorted(tables_dict[s], key=lambda t: t['data_length'] + t['index_length'], reverse=True)
+
+    max_table_size = sorted_tables_list[0]['data_length'] + sorted_tables_list[0]['index_length']
+
+    if arg_sort == 'size':
+
+        print(terminal.get_header_l2(['%s largest tables in schema `%s`' % (arg_limit, s)]))
+
+    else:
+
+        print(terminal.get_header_l2(['Tables in schema `%s`' % s]))
+        sorted_tables_list = sorted(tables_dict[s], key=lambda t: t['table_name'])
+
+    tables_iterations = 0
+
+    for t in sorted_tables_list:
+
+        tables_iterations += 1
+
+        if tables_iterations > arg_limit:
+            break
+
+        if max_table_size == 0:
+
+            data_length_component = 0
+            index_length_component = 0
+
+        else:
+
+            data_length_component = int(t['data_length'] / float(max_table_size) * bar_width)
+            index_length_component = int(t['index_length'] / float(max_table_size) * bar_width)
+
+        bars = '%s%s' % ('=' * data_length_component, '#' * index_length_component)
+        bars = '{0:<{width}}'.format(bars, width=bar_width)
+
+        print('%s [%s] %s M rows, %s GiB, %s GiB data, %s GiB index'
+              % ('{0:<{width}}'.format(t['table_name'], width=max_table_name_width),
+                 bars,
+                 '{0:>{width}}'.format(value.count_to_millions(t['table_rows']), width=9),
+                 '{0:>{width}}'.format(value.bytes_to_gib(t['data_length'] + t['index_length']), width=7),
+                 '{0:>{width}}'.format(value.bytes_to_gib(t['data_length']), width=7),
+                 '{0:>{width}}'.format(value.bytes_to_gib(t['index_length']), width=7)))
+
+# Cleanup
+
+print('')
+print('>>> Script execution finished at %s UTC' % time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime()))

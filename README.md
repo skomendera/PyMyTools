@@ -2,7 +2,7 @@
 
 PyMyTools: simple diagnostic toolkit for Amazon Aurora and MySQL
 
-Version: 0.1
+Version: 0.2.0
 
 See [this blog post](http://blog.symedia.pl/2016/11/pymytools-simple-diagnostic-aurora-mysql.html) for more information and tool demonstrations.
 
@@ -16,6 +16,7 @@ See [this blog post](http://blog.symedia.pl/2016/11/pymytools-simple-diagnostic-
 | `pmt_statvar_monitor` | Print per-second averages of server status variables |
 | `pmt_query_report` | Print diagnostic information for a SELECT query |
 | `pmt_table_report` | Find tables and print details about table structure, indexes and statistics; find index design issues |
+| `pmt_size_report` | Print storage consumption in an instance or selected schema(s), except system schemas |
 
 # Command documentation
 
@@ -138,6 +139,22 @@ Parameters:
 | `table_name` | Table name (required) |
 | `table_schema` | Table schema (optional) |
 
+## pmt_size_report
+
+Depending on the features enabled, the tool uses the following sources of information:
+
+- `INFORMATION_SCHEMA.TABLES`
+
+Parameters:
+
+| Parameter | Description |
+| --- | --- |
+| `--sort` | Sort order for table lists; default: size |
+| `--limit` | List at most that many tables per schema; default: 10, implies --sort size |
+| `--analyze` | Analyze all tables in scope before calculating their size |
+| `schema` | Names of schemas for which size should be calculated; default: all schemas |
+
+
 # Miscellaneous
 
 ### Features unique to Amazon Aurora
@@ -146,7 +163,7 @@ PyMyTools enjoy the following unique features when used against Amazon Aurora:
 
 - Support for statement latency calculations in `pmt_instance_report`, `pmt_cluster_report` 
 - Support for statement latency status variables in `pmt_statvar_monitor`
-- `pmt_cluster_report`
+- `pmt_cluster_report` 
 
 ### Elevated privilege requirements
 

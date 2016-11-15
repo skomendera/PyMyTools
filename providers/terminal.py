@@ -95,3 +95,13 @@ def format_seconds(seconds):
         output.append('%s seconds' % seconds)
 
     return ' '.join(output)
+
+
+def format_documentation_list(links_list):
+
+    text_output = ['Documentation:', '']
+
+    for l in links_list:
+        text_output.append('- %s' % l)
+
+    return '\n'.join(text_output)

@@ -182,7 +182,7 @@ else:
     size_info = table.get_size(dbc.connection, table_name, table_schema)
 
     print('Rows: %s, %s bytes on average' % (size_info['table_rows'], size_info['avg_row_length']))
-    print('Size: %s GiB (data) + %s GiB (index) = %s GiB total (%s%% index)' \
+    print('Size: %s GiB (data) + %s GiB (index) = %s GiB total (%s%% index)'
           % (size_info['data_gb'], size_info['index_gb'], size_info['total_gb'],
              int(size_info['index_gb'] / size_info['total_gb'] * 100) if size_info['total_gb'] != 0 else 0))
 
@@ -209,7 +209,7 @@ if do_analyze and not table_definition['type'] == 'view':
     size_info = table.get_size(dbc.connection, table_name, table_schema)
 
     print('Rows: %s, %s bytes on average' % (size_info['table_rows'], size_info['avg_row_length']))
-    print('Size: %s GiB (data) + %s GiB (index) = %s GiB total (%s%% index)' \
+    print('Size: %s GiB (data) + %s GiB (index) = %s GiB total (%s%% index)'
           % (size_info['data_gb'], size_info['index_gb'], size_info['total_gb'],
              int(size_info['index_gb'] / size_info['total_gb'] * 100) if size_info['total_gb'] != 0 else 0))
 
@@ -246,6 +246,8 @@ if do_analyze_extended and not table_definition['type'] == 'view' and len(index_
         print('! Global or table sample size already equal to %s pages, skipping' % original_sample_pages)
 
     else:
+
+        print('>>> Setting table statistics sample size to %s pages' % extended_sample_size)
 
         try:
 

@@ -2,7 +2,7 @@
 
 from __future__ import print_function
 import time
-from providers import statvar, server
+from providers import statvar, server, terminal
 from commons import PyMyToolsArgParser, PyMyToolsConnection, PyMyToolsDelay
 
 
@@ -40,6 +40,23 @@ delay.delay()
 
 dbc = PyMyToolsConnection(arg_parser)
 dbc.connect()
+
+# Header
+
+if not report_csv:
+
+    header_lines = [
+        'pmt_statvar_monitor invoked at %s UTC' % time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())
+    ]
+
+    print(terminal.get_header_l1(header_lines, 120))
+
+    doc_links = [
+        'http://dev.mysql.com/doc/refman/5.7/en/server-status-variables.html'
+    ]
+
+    print(terminal.format_documentation_list(doc_links))
+    print()
 
 # Logic
 

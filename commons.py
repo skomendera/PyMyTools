@@ -15,7 +15,11 @@ class PyMyToolsArgParser:
     args = None
 
     def __init__(self, tool_name, endpoint_type='instance'):
-        self.parser = argparse.ArgumentParser(description=tool_name)
+
+        tool_epilog = 'WARNING: Statements executed by this program may execute slowly and/or ' \
+                      'affect performance of large or busy databases. Use at your own risk.'
+
+        self.parser = argparse.ArgumentParser(description=tool_name, epilog=tool_epilog)
 
         host_socket_group = self.parser.add_mutually_exclusive_group(required=True)
 

@@ -70,7 +70,7 @@ for node in cluster_topology:
 
 cluster_topology = tmp_topology
 
-print('Detected %s nodes:' % len(cluster_topology))
+print('Detected %s node(s):' % len(cluster_topology))
 print('')
 
 master_host_status = None
@@ -83,11 +83,12 @@ for node_id, node_status in cluster_topology.items():
         master_host_status = node_status
 
         print('+- "%s" (Writer)' % node_id)
-        print('|')
 
 for node_id, node_status in cluster_topology.items():
 
     if node_status['SESSION_ID'] != 'MASTER_SESSION_ID':
+
+        print('|')
         print('+---- "%s": %s ms lag, streaming at %s KiB/s, oldest read view %s trx behind master'
               % (node_id, round(node_status['REPLICA_LAG_IN_MILLISECONDS'], 1),
                  round(node_status['LOG_STREAM_SPEED_IN_KiB_PER_SECOND'], 1),
@@ -254,3 +255,8 @@ for node_id, node_status in cluster_topology.items():
     print('')
 
     nc.disconnect()
+
+# Cleanup
+
+print('')
+print('>>> Script execution finished at %s UTC' % time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime()))

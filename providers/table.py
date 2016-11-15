@@ -155,3 +155,14 @@ def set_sample_size(connection, table_name, table_schema, sample_size):
     query = 'alter table %s.%s stats_sample_pages = %s' % (table_schema, table_name, sample_size)
 
     server.execute_raw_dict(connection, query)
+
+
+def get_count(connection, schemas_list):
+
+    with connection.cursor() as cursor:
+
+        sql = "select count(1) from information_schema.tables where table_schema in ('%s')" % "', '".join(schemas_list)
+
+        cursor.execute(sql)
+
+        return cursor.fetchone()[0]

@@ -3,6 +3,7 @@
 from __future__ import print_function
 import time
 import pymysql
+import sys
 from warnings import filterwarnings, resetwarnings
 from providers import terminal, server, result
 from commons import PyMyToolsArgParser, PyMyToolsConnection, PyMyToolsDelay
@@ -10,14 +11,14 @@ from commons import PyMyToolsArgParser, PyMyToolsConnection, PyMyToolsDelay
 
 # Parser instantiation
 
-arg_parser = PyMyToolsArgParser('Print diagnostic information for a SELECT query')
+arg_parser = PyMyToolsArgParser('Print diagnostic information for a query')
 
 arg_parser.parser.add_argument('--input-file', help='Input file containing the query', required=True)
 arg_parser.parser.add_argument('--trace', help='Show optimizer trace (EXPLAIN JSON)',
                                action='store_true', default=False)
 arg_parser.parser.add_argument('--vertical', help='Use vertical output instead of tabular for EXPLAIN',
                                action='store_true', default=False)
-arg_parser.parser.add_argument('--profile', help='Execute the query twice with profiling',
+arg_parser.parser.add_argument('--profile', help='Execute the query twice with profiling (SELECT statements only)',
                                action='store_true', default=False)
 
 arg_parser.parse_args()
@@ -35,11 +36,23 @@ try:
     report_query = report_file_handle.read().split()
     report_file_handle.close()
 
-    # remove SELECT
+except IOError as e:
 
-    if report_query[0].lower() != 'select':
+    raise Exception('Could not read input file: %s' % e)
 
-        raise Exception('Statement text must begin with SELECT')
+report_query_is_select = True
+
+# remove SELECT
+
+if report_query[0].lower() != 'select':
+
+    report_query_is_select = False
+
+    if report_profile:
+        print('!!! Unable to --profile, this feature is only supported for SELECT statements')
+        sys.exit(1)
+
+else:
 
     del report_query[0]
 
@@ -50,11 +63,8 @@ try:
         del report_query[0]
 
     report_query.insert(0, 'select sql_no_cache')
-    report_query = ' '.join(report_query)
 
-except IOError as e:
-
-    raise Exception('Could not open input file: %s' % e)
+report_query = ' '.join(report_query)
 
 # Delay execution if necessary, connect to database
 
@@ -86,6 +96,14 @@ explain_result = server.execute_raw_dict(dbc.connection, explain_query)
 print(result.result_format_vertical(explain_result) if report_vertical
       else result.result_format_tabular(explain_result))
 
+doc_links = [
+    'http://dev.mysql.com/doc/refman/5.7/en/explain.html',
+    'http://dev.mysql.com/doc/refman/5.7/en/explain-output.html'
+]
+
+print()
+print(terminal.format_documentation_list(doc_links))
+
 # EXPLAIN FORMAT=JSON
 
 if report_trace:
@@ -100,7 +118,7 @@ if report_trace:
 
 # RUN + PROFILE
 
-if report_profile:
+if report_profile and report_query_is_select is True:
 
     print(terminal.get_header_l2(['Query profile for 2 consecutive executions']))
 
@@ -113,6 +131,14 @@ if report_profile:
 
     server.execute_raw_dict(dbc.connection, report_query)
     print(result.result_format_tabular(server.execute_raw_dict(dbc.connection, 'show profile for query 4')))
+
+    doc_links = [
+        'http://dev.mysql.com/doc/refman/5.7/en/show-profile.html',
+        'http://dev.mysql.com/doc/refman/5.7/en/performance-schema-query-profiling.html'
+    ]
+
+    print()
+    print(terminal.format_documentation_list(doc_links))
 
 resetwarnings()
 
