@@ -10,7 +10,7 @@ from commons import PyMyToolsArgParser, PyMyToolsConnection, PyMyToolsDelay
 
 # Parser instantiation
 
-arg_parser = PyMyToolsArgParser('Print storage consumption in an instance or selected schema(s), except system schemas')
+arg_parser = PyMyToolsArgParser('Report the size of schemas and tables (excluding system schemas)')
 
 arg_parser.parser.add_argument('--sort', help='Sort order for table lists; default: size',
                                choices=['alpha','size'], type=str, default='size')
