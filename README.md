@@ -16,7 +16,7 @@ See [this blog post](http://blog.symedia.pl/2016/11/pymytools-simple-diagnostic-
 | `pmt_statvar_monitor` | Print per-second averages of server status variables |
 | `pmt_query_report` | Print diagnostic information for a SELECT query |
 | `pmt_table_report` | Find tables and print details about table structure, indexes and statistics; find index design issues |
-| `pmt_size_report` | Report the size of schemas and tables (exclusing system schemas) |
+| `pmt_size_report` | Report the size of schemas and tables (excluding system schemas) |
 
 # Command documentation
 
